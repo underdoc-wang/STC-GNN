@@ -122,10 +122,9 @@ def check_data(data, data_01):
     return None
 
 
-def plot_data(data, data_01, args):
+def plot_histo(data, data_01, args):
     plt.hist(data.flatten())
     plt.show()
-    #plt.savefig(f'/Users/aist-dprt/Documents/KDD20/Data/Emergency/figures/num_distribution_int{args.t_interval}h.pdf')
 
     plt.hist(data_01.flatten())
     #counts, bins = np.histogram(data_01)
@@ -133,100 +132,9 @@ def plot_data(data, data_01, args):
     #plt.hist(bins[:-1], bins, weights=counts)
     #plt.xticks([0, 1])
     plt.title(f'Binary Distribution of Occurence@{args.t_interval}h Interval')
-    plt.show()
-    #plt.savefig(f'/Users/aist-dprt/Documents/KDD20/Data/Emergency/figures/binary_distribution_int{args.t_interval}h.pdf')
-    '''
-    # all grids
-    nonzero_count = 0
-    for i in range(H):
-        for j in range(W):
-            reg_map = []
-            print_flag = False
-
-            for c in range(6):
-                ts_ijc = data20x8[:, i, j, c]
-                ts_lst = []
-                for t in range(data20x8.shape[0] // 24):
-                    day_value = sum(ts_ijc[t * 24: (t + 1) * 24])
-                    ts_lst.append(day_value)
-                if not np.any(ts_lst):  # all zero
-                    continue
-                # plt.plot(pd.date_range(start = '1/1/2016', end = '6/30/2016', freq = 'D'), ts_lst,
-                # ls = '-', label = label_dict[c])
-                reg_map.append(ts_lst)
-                print_flag = True
-
-            if print_flag:
-                map_stack = np.vstack(reg_map)
-                plt.stackplot(pd.date_range(start='1/1/2016', end='6/30/2016', freq='D'), map_stack)
-                nonzero_count += 1
-                plt.title(f'Grid: ({i}, {j})')
-                plt.xlabel('Time')
-                plt.ylabel('#Incidents')
-                plt.legend(['violation', 'misdemeanor', 'felony', 'ems', 'rescue', 'fire'])
-                plt.show()
-    print(nonzero_count)
-    
-    # major grids
-    
-    where = 'Wall Street'
-
-    x = 19
-    y = 2
-    cat_lst = []
-    for c in range(6):
-        ts_x_y_c = data_int1h[:, x, y, c]
-        ts_lst = []
-        for t in range(data_int1h.shape[0] // 24):
-            day_value = sum(ts_x_y_c[t * 24:(t + 1) * 24])
-            ts_lst.append(day_value)
-        cat_lst.append(ts_lst)
-    cat_stack1 = np.vstack(cat_lst)
-
-    x = 18
-    y = 2
-    cat_lst = []
-    for c in range(6):
-        ts_x_y_c = data_int1h[:, x, y, c]
-        ts_lst = []
-        for t in range(data_int1h.shape[0] // 24):
-            day_value = sum(ts_x_y_c[t * 24:(t + 1) * 24])
-            ts_lst.append(day_value)
-        cat_lst.append(ts_lst)
-    cat_stack2 = np.vstack(cat_lst)
-
-    x = 19
-    y = 3
-    cat_lst = []
-    for c in range(6):
-        ts_x_y_c = data_int1h[:, x, y, c]
-        ts_lst = []
-        for t in range(data_int1h.shape[0] // 24):
-            day_value = sum(ts_x_y_c[t * 24:(t + 1) * 24])
-            ts_lst.append(day_value)
-        cat_lst.append(ts_lst)
-    cat_stack3 = np.vstack(cat_lst)
-
-    x = 18
-    y = 3
-    cat_lst = []
-    for c in range(6):
-        ts_x_y_c = data_int1h[:, x, y, c]
-        ts_lst = []
-        for t in range(data_int1h.shape[0] // 24):
-            day_value = sum(ts_x_y_c[t * 24:(t + 1) * 24])
-            ts_lst.append(day_value)
-        cat_lst.append(ts_lst)
-    cat_stack4 = np.vstack(cat_lst)
-
-    cat_stack = cat_stack1 + cat_stack2 + cat_stack3 + cat_stack4
-
-    plt.stackplot(pd.date_range(start='1/1/2016', end='6/30/2016', freq='D').tolist(), cat_stack)
-    plt.title(where)
-    plt.legend(['violation', 'misdemeanor', 'felony', 'ems', 'rescue', 'fire'])
     #plt.show()
-    plt.savefig(f'/Users/aist-dprt/Documents/KDD20/Data/Emergency/figures/{where}.pdf')
-    '''
+    plt.savefig(os.path.join(args.out_dir, str(args.t_interval)+'h', 'binary_distribution.png'))
+
     return None
 
 
@@ -258,24 +166,14 @@ if __name__ == '__main__':
 
     print('Emergency NYC shape: ', data.shape)
     data_int = data.astype(int)
-    #np.save(os.path.join(args.out_dir, 'num', f'EmergNYC_{H}x{W}_int{args.t_interval}h.npy'), data_int)
-
     # total counts for all categories
     for c in range(data_int.shape[-1]):
         print(np.sum(data_int[:,:,:,c]))
-    # verify central park
-    #for i in range(13, 18):
-    #    print(f'({i},2)', np.sum(data20x8[:,i,2,:]))
 
     # clip to 0/1
     data_01 = np.clip(data_int, 0, 1)
-    #np.save(os.path.join(args.out_dir, f'EmergNYC_01_{H}x{W}_int{args.t_interval}h.npy'), data_01)
-
-
-    #data_int = np.load(f'/Users/aist-dprt/Documents/KDD20/Data/Emergency/num/EmergNYC_{H}x{W}_int{args.t_interval}h.npy')
-    #data_01 = np.load(f'/Users/aist-dprt/Documents/KDD20/Data/Emergency/EmergNYC_01_{H}x{W}_int{args.t_interval}h.npy')
-    #print(data_01.shape)
+    np.save(os.path.join(args.out_dir, str(args.t_interval)+'h', f'EmergNYC_bi_{H}x{W}.npy'), data_01)
 
     check_data(data_int, data_01)
-    plot_data(data_int, data_01, args)
+    plot_histo(data_int, data_01, args)
 
