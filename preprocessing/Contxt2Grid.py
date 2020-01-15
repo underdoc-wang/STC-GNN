@@ -6,7 +6,6 @@ import pandas as pd
 import geopandas as gpd
 import matplotlib.pyplot as plt
 from math import floor
-import holidays
 from preprocessing.Emerg2Grid import pgps_to_xy
 from preprocessing.utils import heatmap
 
@@ -257,61 +256,11 @@ def get_pearson(args):
     return None
 
 
-def get_context_feature(args):
-    demo = np.load(os.path.join(args.out_dir, 'demo.npy'))     # normalized
-    poi = np.load(os.path.join(args.out_dir, 'POI.npy'))       # normalized POI vs. pure POI counts?
-    print('demo shape:', demo.shape, f'demo range ({np.amin(demo)}, {np.amax(demo)}) \n',
-          'POI shape:', poi.shape, f'POI range ({np.amin(poi)}, {np.amax(poi)}) \n')
-
-    # concate
-    #attributes = np.concatenate((demo, poi), axis=-1)
-    #print('attributes shape:', attributes.shape)
-    #np.save(os.path.join(args.aim_dir, 'Attribute', 'attributes_POInorm.npy'), attributes)
-
-    # normalize to 0~1
-    demo_norm = demo / demo.max(axis=0)
-    print(f'demo_norm shape: {demo_norm.shape}, demo_norm range ({np.amin(demo_norm)}, {np.amax(demo_norm)})')
-    poi_norm = poi / poi.max(axis=0)
-    print(f'POI_norm shape: {poi_norm.shape}, POI_norm range ({np.amin(poi_norm)}, {np.amax(poi_norm)})')
-
-    demo_norm_vec = demo_norm.reshape((-1, demo_norm.shape[-1]))
-
-    # calculate node cosine similarity - on demo/socio factors
-    n_nodes = demo_norm_vec.shape[0]
-    demo_sim = np.zeros((n_nodes, n_nodes))
-    for i in range(n_nodes):
-        for j in range(n_nodes):
-            demo_sim[i, j] = np.dot(demo_norm_vec[i], demo_norm_vec[j]/(epsilon + np.linalg.norm(demo_norm_vec[i])*np.linalg.norm(demo_norm_vec[j])))
-    print(f'Cosine similarity shape: {demo_sim.shape}, cos_sim range ({np.amin(demo_sim)}, {np.amax(demo_sim)})')
-
-    poi_feat = poi_norm.reshape((-1, poi_norm.shape[-1]))
-    assert demo_sim.shape[-1] == poi_feat.shape[0]
-
-    # check if A (demo_sim) symmetric
-    print('If matrix A symmetric:', check_symmetric(demo_sim))
-    # check how many 0s in A
-    #print(demo_sim)
-    print('#0:', np.count_nonzero(demo_sim==0))
-    # check distribution
-    #plt.hist(demo_sim.flatten())
-    #plt.show()
-    # clip min to 1e-08
-    demo_sim = np.clip(demo_sim, 1e-08, 1)
-    print(f'Clipped cos_sim range ({np.amin(demo_sim)}, {np.amax(demo_sim)})')
-
-    #np.save('../Data/A_demo_sim.npy', demo_sim)
-    #np.save('../Data/X_poi_feat.npy', poi_feat)
-
-    return None
-
-def check_symmetric(a, rtol=1e-05, atol=1e-08):
-    return np.allclose(a, a.T, rtol=rtol, atol=atol)
-
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='NYC attribute data preprocessing')
     parser.add_argument('-in', '--aim_dir', type=str, help='Aim directory', default='./from_raw/static')
     parser.add_argument('-out', '--out_dir', type=str, help='Output directory', default='./from_raw/raw')
+    # change 'contxt_type' to POI/demo/pass respectively to process the data
     parser.add_argument('-type', '--contxt_type', type=str, choices=['demo', 'POI', 'pass'],
                         default='pass', help='Context type')
     parser.add_argument('-y', '--year', type=int, default=2015, help='Aim year')
@@ -329,14 +278,11 @@ if __name__ == '__main__':
     elif args.contxt_type == 'demo':
         demo_dir = os.path.join(args.aim_dir, f'demo{str(args.year)[-2:]}.csv')
         ct_dir = os.path.join(args.aim_dir, 'CensusTractNYC.geojson')
-        #process_demo(reg_dir, demo_dir, ct_dir, args)
+        process_demo(reg_dir, demo_dir, ct_dir, args)
         demo_grid_dir = os.path.join(args.aim_dir, f'demo{str(args.year)[-2:]}_grid.csv')
         demo_pd2np(demo_grid_dir)
     else:
         pass
 
     # Pearson's R
-    #get_pearson(args)
-
-    # generate context features
-    get_context_feature(args)
+    get_pearson(args)
