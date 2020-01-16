@@ -194,19 +194,29 @@ def get_pearson(args):
                 'fract', '%poverty', '%unemployment', 'median_income', 'gini_coeff', '%no_high_school', '%bachelor',
                 '%same_house', 'mean_bldg_age', '%occupancy', '%ownership', 'pop_density']
     pearson_demo = []
+    sig_demo = []
     for i in range(len(demo_lst)):
-        row =[]
+        row = []
+        sig = []
         for e in range(len(emerg_lst)):
-            r = stats.pearsonr(demo[:, i], emerg[:, e])[0]
-            print(f'{demo_lst[i]}~{emerg_lst[e]}: {r}')
+            r, p = stats.pearsonr(demo[:, i], emerg[:, e])
+            print(f'{demo_lst[i]}~{emerg_lst[e]}: {round(r, 4)}, sig: {round(p, 4)}')
             row.append(r)
+            sig.append(p)
         pearson_demo.append(row)
+        sig_demo.append(sig)
     pearson_demo_np = np.array(pearson_demo)
+    sig_demo_np = np.array(sig_demo)
     print(pearson_demo_np.shape)
 
-    # print avg. pearson's r
-    print("Pearson's r - row mean")
-    print(np.mean(pearson_demo_np, axis=1))
+    # print pearson's r range
+    print("Pearson's r - row range")
+    #for demo, min_, max_ in zip(demo_lst, np.min(pearson_demo_np, axis=1), np.max(pearson_demo_np, axis=1)):
+    #    print(demo, round(min_,4), round(max_,4))
+    for i in range(pearson_demo_np.shape[0]):
+        print(demo_lst[i], '\n',
+              round(np.min(pearson_demo_np[i,:]), 4), 'p', round(sig_demo_np[i, np.argmin(pearson_demo_np[i,:])], 6), '\n',
+              round(np.max(pearson_demo_np[i,:]), 4), 'p', round(sig_demo_np[i, np.argmax(pearson_demo_np[i,:])], 6), '\n')
 
     fig, ax = plt.subplots()
     im, cbar = heatmap.heatmap(pearson_demo_np, demo_lst, emerg_lst, ax=ax, vmin=-0.3, vmax=0.5,
