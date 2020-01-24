@@ -1,10 +1,8 @@
 import os
-import time
 import argparse
 import numpy as np
-from sklearn.metrics import classification_report, confusion_matrix, f1_score, fbeta_score, \
-     roc_auc_score, roc_curve, average_precision_score, precision_recall_curve, \
-     log_loss, mean_absolute_error, recall_score
+import pandas as pd
+from model.metrics import eval_metrics
 
 
 
@@ -18,13 +16,23 @@ def load_data(in_dir):
     return data, ha
 
 
-def split_data(data, test_ratio):
-    test_len = int(data.shape[0] * test_ratio)
-    trainSet = data[:-test_len, :,:,:]
-    testSet = data[-test_len:, :,:,:]
+def split_data(data, dates, delta_t):
+    assert len(dates) == 4, 'Invalid dates input.. Please input a sequence with four items.' \
+                            ' Input example: -date 20150101 20150531 20150601 20150630'
+    train_start, train_end, test_start, test_end = dates     # unpack dates
+    day_timestep = int(24/delta_t)     # number of timesteps per day
 
-    print('Train set shape:', trainSet.shape)
-    print('Test set shape:', testSet.shape)
+    dates_range = pd.date_range('20150101', '20151231').strftime('%Y%m%d').tolist()     # date range covers entire dataset
+    assert len(dates_range) == int(data.shape[0]/day_timestep)
+
+    # train set
+    start_index, end_index = dates_range.index(train_start), dates_range.index(train_end)
+    trainSet = data[start_index*day_timestep:(end_index+1)*day_timestep]
+    print(f'Train set {train_start}-{train_end}: {trainSet.shape}')
+    # test set
+    start_index, end_index = dates_range.index(test_start), dates_range.index(test_end)
+    testSet = data[start_index*day_timestep:(end_index+1)*day_timestep]
+    print(f'Test set {test_start}-{test_end}: {testSet.shape}')
 
     return trainSet, testSet
 
@@ -42,121 +50,29 @@ def run_model(model_name, model_dir, trainSet, testSet, timestep):
     elif model_name == 'LASSO':
         # TODO: LASSO - Cai 1/31
         pass
+
     elif model_name == 'SVM':
         # TODO: SVM - Cai 1/31
         pass
+
     else:
-        raise Exception('Unknown model')
+        raise Exception('Unknown model name..')
 
     return y_true, y_pred
 
-
-def eval_metrics(out_dir, y_true, y_pred_proba, ha):
-    '''
-    # global model
-    # evaluate on macro/micro-F1/F2, recall, AUC/AP, BCE, MAE
-
-    :param out_dir:
-    :param y_true: ground truth (t+1) - (T, 20, 10, 6)
-    :param y_pred: prediction (t+1) - (T, 20, 10, 6)
-    :param ha: regional occurence rate of each category - threshold for y_pred
-    :return:
-    '''
-    assert y_true.shape == y_pred_proba.shape, f"Prediction's dimension doesn't match ground truth \n" \
-                                               f"truth: {y_true.shape}, pred: {y_pred_proba.shape}"
-
-    with open(out_dir + '/eval_metrics.txt', 'a') as wf:
-        wf.write(' '.join(['*'*10, 'model evaluation started at', time.ctime(), '*'*10]) + '\n')
-        print(' '.join(['*'*10, 'model evaluation started at', time.ctime(), '*'*10]))
-
-    # loop timestamp - proba to binary label
-    y_pred = []
-    for t in range(y_pred_proba.shape[0]):
-        y_pred.append(np.where(y_pred_proba[t,:,:,:] >= ha, 1, 0))
-    y_pred = np.array(y_pred)
-
-    tp_lst, fn_lst, fp_lst = [], [], []     # to calculate Macro-F1/F2
-    f1_lst = []          # to calculate Micro-F1
-    f2_lst = []          # to calculate Micro-F2
-
-    # loop category
-    for c in range(y_true.shape[-1]):
-        y_true_c = y_true[:,:,:,c].flatten()
-        y_pred_c = y_pred[:,:,:,c].flatten()
-        y_pred_proba_c = y_pred_proba[:,:,:,c].flatten()
-
-        # single category evaluation
-        print(f"{C_lst[c]} \n \
-                             F1-score: {round(f1_score(y_true_c, y_pred_c), 5)} \n \
-                             F2-score: {round(fbeta_score(y_true_c, y_pred_c, 2), 5)} \n \
-                             AUC score: {round(roc_auc_score(y_true_c, y_pred_proba_c), 5)} \n \
-                             AP score: {round(average_precision_score(y_true_c, y_pred_proba_c), 5)} \n")
-        # check recall vs. precision
-        f1_report = classification_report(y_true_c, y_pred_c, labels=np.unique(y_pred_c))
-        print(f1_report)
-
-        # confusion matrix
-        print('confusion matrix: \n', confusion_matrix(y_true_c, y_pred_c), '\n')
-
-        TN, FP, FN, TP = confusion_matrix(y_true_c, y_pred_c).ravel()
-        tp_lst.append(TP)
-        fn_lst.append(FN)
-        fp_lst.append(FP)
-        f1_lst.append(2 * TP / (2 * TP + FN + FP))
-        f2_lst.append((1 + beta ** 2) * TP / ((1 + beta ** 2) * TP + (beta ** 2) * FN + FP))
-    # F1
-    macro_f1 = 2 * sum(tp_lst) / (2 * sum(tp_lst) + sum(fn_lst) + sum(fp_lst))
-    micro_f1 = sum(f1_lst) / len(f1_lst)
-    # F2
-    macro_f2 = (1 + beta ** 2) * sum(tp_lst) / ((1 + beta ** 2) * sum(tp_lst) + (beta ** 2) * sum(fn_lst) + sum(fp_lst))
-    micro_f2 = sum(f2_lst) / len(f2_lst)
-
-    macro_f1, micro_f1, macro_f2, micro_f2 = round(macro_f1, 5), round(micro_f1, 5), round(macro_f2, 5), round(micro_f2, 5)
-
-    # flatten arrays for global metrics
-    y_true, y_pred_proba, y_pred = y_true.flatten(), y_pred_proba.flatten(), y_pred.flatten()
-
-    # overall recall
-    RECALL = round(recall_score(y_true, y_pred), 5)
-
-    # overall AUC / AP
-    AUC = round(roc_auc_score(y_true, y_pred_proba), 5)
-    AP = round(average_precision_score(y_true, y_pred_proba), 5)
-
-    # Cross-Entropy
-    CE = round(log_loss(y_true=y_true, y_pred=y_pred_proba), 5)
-    # Mean Absolute Error
-    MAE = round(mean_absolute_error(y_true=y_true, y_pred=y_pred_proba), 5)
-
-    # output
-    with open(out_dir + '/eval_metrics.txt', 'a') as wf:
-        print(f' Macro-F1: {macro_f1}, Micro-F1: {micro_f1} \n Macro-F2: {macro_f2}, Micro-F2: {micro_f2} \n'
-              f' Overall recall: {RECALL} \n'
-              f' Overall AUC score: {AUC}, AP score: {AP} \n'
-              f' Binary Cross-Entropy: {CE}, MAE: {MAE} \n')
-        wf.write(f' Macro-F1: {macro_f1}, Micro-F1: {micro_f1} \n Macro-F2: {macro_f2}, Micro-F2: {micro_f2} \n'
-                 f' Overall recall: {RECALL} \n'
-                 f' Overall AUC score: {AUC}, AP score: {AP} \n'
-                 f' Binary Cross-Entropy: {CE}, MAE: {MAE} \n')
-        wf.write(' '.join(['*'*10, 'model evaluation ended at', time.ctime(), '*'*10]) + '\n \n')
-        print(' '.join(['*'*10, 'model evaluation ended at', time.ctime(), '*'*10]))
-
-    return None
-
-
-
-# global
-C_lst = ['Violation', 'Misdemeanor', 'Felony', 'EMS', 'Rescue', 'Fire']
-beta = 2          # for F-beta score: beta stands for weight of recall(FN) over precision(FP)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run ML models for emergency prediction')
     parser.add_argument('-in', '--in_dir', type=str, help='Input directory', default='../data')
     parser.add_argument('-model', '--model_name', type=str, help='Choose prediction model',
-                        choices=['LR', 'VAR', 'LASSO', 'SVM'], default='VAR')
+                        choices=['LR', 'VAR', 'LASSO', 'SVM'], default='LR')
     parser.add_argument('-t', '--delta_t', type=int, default=4, help='Time interval in hour(s)')
     parser.add_argument('-l', '--seq_len', type=int, default=6, help='Sequence length of observation steps')
+    parser.add_argument('-date', '--dates', type=str, nargs='+',
+                        help='Start/end dates of train/test sets. Test follows train.'
+                             ' Example: -date 20150101 20150531 20150601 20150630',
+                        default=['20150101', '20150531', '20150601', '20150630'])
 
     args = parser.parse_args()
 
@@ -170,8 +86,8 @@ if __name__ == '__main__':
     # load data
     data, ha = load_data(in_dir)
 
-    # split train/test data
-    trainSet, testSet = split_data(data, test_ratio=61/365)     # test on last 2 months
+    # split train/test sets
+    trainSet, testSet = split_data(data, args.dates, args.delta_t)
 
     # run model
     y_true, y_pred = run_model(args.model_name, out_dir, trainSet, testSet, args.seq_len)

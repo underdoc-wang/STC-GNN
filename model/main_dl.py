@@ -2,12 +2,10 @@ import os
 import time
 import argparse
 import numpy as np
-from sklearn.metrics import classification_report, confusion_matrix, f1_score, fbeta_score, \
-     roc_auc_score, roc_curve, average_precision_score, precision_recall_curve, \
-     log_loss, mean_absolute_error, recall_score
-
+import pandas as pd
 from keras.losses import binary_crossentropy
 from keras.callbacks import EarlyStopping, CSVLogger, ModelCheckpoint, LearningRateScheduler
+from model.metrics import eval_metrics, H, W, C_lst
 
 
 def load_data(in_dir):
@@ -20,36 +18,61 @@ def load_data(in_dir):
     return data, ha
 
 
-def getXSYS(data, len_test, len_seq):
-    X_seq, Y_seq = [], []
-    for i in range(data.shape[0] - len_seq):
-        X_seq.append(data[i:i + len_seq])
-        Y_seq.append(data[i + len_seq])
+def getXSYS(data, timestep):
+    XS, YS = [], []
+    for i in range(data.shape[0] - timestep):
+        x = data[i : i + timestep, :, :, :]
+        y = data[i + timestep, :, :, :]
+        XS.append(x), YS.append(y)
+    XS, YS = np.array(XS), np.array(YS)
 
-    X_seq, Y_seq = np.array(X_seq), np.array(Y_seq)
-    print('X_sequence shape:', X_seq.shape,
-          'Y_sequence shape:', Y_seq.shape)
+    return XS, YS
 
-    # get train/test sets
-    print('Constructing train/test sets...')
-    trainX, testX = X_seq[:-len_test], X_seq[-len_test:]
-    trainY, testY = Y_seq[:-len_test], Y_seq[-len_test:]
 
-    print('Train set shape:', trainX.shape, trainY.shape)
-    print('Test set shape:', testX.shape, testY.shape)
+def split_data(data, dates, delta_t, len_seq):
+    assert len(dates) == 4, 'Invalid dates input.. Please input a sequence with four items.' \
+                            ' Input example: -date 20150101 20150531 20150601 20150630'
+    train_start, train_end, test_start, test_end = dates     # unpack dates
+    day_timestep = int(24/delta_t)     # number of timesteps per day
+
+    dates_range = pd.date_range('20150101', '20151231').strftime('%Y%m%d').tolist()     # date range covers entire dataset
+    assert len(dates_range) == int(data.shape[0]/day_timestep)
+
+    # train set
+    start_index, end_index = dates_range.index(train_start), dates_range.index(train_end)
+    trainSet = data[start_index*day_timestep:(end_index+1)*day_timestep]
+    print(f'Train set {train_start}-{train_end}: {trainSet.shape}')
+    # test set
+    start_index, end_index = dates_range.index(test_start), dates_range.index(test_end)
+    testSet = data[start_index*day_timestep:(end_index+1)*day_timestep]
+    print(f'Test set {test_start}-{test_end}: {testSet.shape}')
+
+    # get X/Y features
+    trainX, trainY = getXSYS(trainSet, len_seq)
+    testX, testY = getXSYS(testSet, len_seq)
+    print('Train set shape: X/Y', trainX.shape, trainY.shape)
+    print('Test set shape: X/Y', testX.shape, testY.shape)
 
     return (trainX, trainY), (testX, testY)
 
 
-def get_model(model_name, timestep, n_lstm_layers, n_hidden_units):
+def get_model(model_name, timestep, n_layers, n_hidden_units, region_size, n_channel):
     print(f'Building model {model_name}.. \n   Observing last {timestep} steps to predict next one step.')
     if model_name == 'GRU':
         from baseline.GRU import get_GRU
-        model = get_GRU(timestep, n_lstm_layers, n_hidden_units)
+        model = get_GRU(timestep, n_layers, n_hidden_units)
 
     elif model_name == 'ConvLSTM':
         from baseline.ConvLSTM import get_ConvLSTM
-        model = get_ConvLSTM(timestep, n_lstm_layers, n_hidden_units)
+        model = get_ConvLSTM(timestep, n_layers, n_hidden_units)
+
+    elif model_name == 'MiST':
+        from baseline.MiST import get_MiST
+        model = get_MiST(timestep, n_layers, n_hidden_units, region_size, n_channel)
+
+    elif model_name == 'Hetero-ConvLSTM':
+        from baseline.Hetero_ConvLSTM import get_Hetero_ConvLSTM
+        model = get_Hetero_ConvLSTM(timestep, n_layers, n_hidden_units)
 
     else:
         raise Exception('Unknown model')
@@ -61,9 +84,9 @@ def get_model(model_name, timestep, n_lstm_layers, n_hidden_units):
     return model
 
 
-def train_model(args, out_dir, model, trainSet, HA):
+def train_model(args, out_dir, model, trainSet):
     # unpack
-    lr, batchs, epochs, val_split = args.lr, args.batch_size, args.max_epoch, args.val_ratio
+    lr, batchs, epochs, val_split = args.learn_rate, args.batch_size, args.max_epoch, args.val_ratio
     trainX, trainY = trainSet
 
     # callbacks
@@ -75,23 +98,26 @@ def train_model(args, out_dir, model, trainSet, HA):
     with open(out_dir + '/eval_metrics.txt', 'a') as wf:
         print(' '.join(['*' * 10, 'model training started at', time.ctime(), '*' * 10]))
         wf.write(' '.join(['*' * 10, 'model training started at', time.ctime(), '*' * 10]) + '\n')
-        wf.write(f'Hyper-paramters: lr {lr}    batch_size {batchs}    epochs {epochs} \n')
-        print(f'Hyper-paramters: lr {lr}    batch_size {batchs}    epochs {epochs}')
+        wf.write(f'Training configs: {args}\n')
+        print(f'Training configs: {args}')
 
     # fit model
     history = model.fit(trainX, trainY, batch_size=batchs, epochs=epochs,
                         verbose=1, validation_split=val_split, shuffle=False,
                         callbacks=[csv_logger, check_pointer, early_stopper, learning_rater])
-    # predict/evaluate
-    predY = model.predict(trainX)
-    eval_metrics(out_dir, trainY, predY, HA)
-
     model.save_weights(out_dir + '/trained_weights.h5', overwrite=True)
 
-    return None
+    # predict
+    predY = model.predict(trainX)
+    # check out for local model
+    if len(trainY.shape) != 4:   # 2
+        trainY = trainY.reshape((-1, H, W, len(C_lst)))
+        predY = predY.reshape((-1, H, W, len(C_lst)))
+
+    return trainY, predY
 
 
-def test_model(out_dir, model, testSet, HA):
+def test_model(out_dir, model, testSet):
     # unpack
     testX, testY = testSet
 
@@ -102,136 +128,38 @@ def test_model(out_dir, model, testSet, HA):
         wf.write(' '.join(['*' * 10, 'model testing started at', time.ctime(), '*' * 10]) + '\n')
         print(' '.join(['*' * 10, 'model testing started at', time.ctime(), '*' * 10]))
 
-    # predict/evaluate
+    # predict
     predY = model.predict(testX)
-    eval_metrics(out_dir, testY, predY, HA)
+    # check out for local model
+    if len(testY.shape) != 4:   # 2
+        testY = testY.reshape((-1, H, W, len(C_lst)))
+        predY = predY.reshape((-1, H, W, len(C_lst)))
 
-    return None
+    return testY, predY
 
-
-def eval_metrics(out_dir, y_true, y_pred_proba, ha):
-    '''
-    # global model
-    # evaluate on macro/micro-F1/F2, recall, AUC/AP, BCE, MAE
-
-    :param out_dir:
-    :param y_true: ground truth (t+1) - (T, 20, 10, 6)
-    :param y_pred: prediction (t+1) - (T, 20, 10, 6)
-    :param ha: regional occurence rate of each category - threshold for y_pred
-    :return:
-    '''
-    assert y_true.shape == y_pred_proba.shape, f"Prediction's dimension doesn't match ground truth \n" \
-                                               f"truth: {y_true.shape}, pred: {y_pred_proba.shape}"
-
-    with open(out_dir + '/eval_metrics.txt', 'a') as wf:
-        wf.write(' '.join(['*'*10, 'model evaluation started at', time.ctime(), '*'*10]) + '\n')
-        print(' '.join(['*'*10, 'model evaluation started at', time.ctime(), '*'*10]))
-
-    # loop timestamp - proba to binary label
-    y_pred = []
-    for t in range(y_pred_proba.shape[0]):
-        y_pred.append(np.where(y_pred_proba[t,:,:,:] >= ha, 1, 0))
-    y_pred = np.array(y_pred)
-
-    tp_lst, fn_lst, fp_lst = [], [], []     # to calculate Macro-F1/F2
-    f1_lst = []          # to calculate Micro-F1
-    f2_lst = []          # to calculate Micro-F2
-
-    # loop category
-    for c in range(y_true.shape[-1]):
-        y_true_c = y_true[:,:,:,c].flatten()
-        y_pred_c = y_pred[:,:,:,c].flatten()
-        y_pred_proba_c = y_pred_proba[:,:,:,c].flatten()
-
-        # single category evaluation
-        print(f"{C_lst[c]} \n \
-                             F1-score: {round(f1_score(y_true_c, y_pred_c), 5)} \n \
-                             F2-score: {round(fbeta_score(y_true_c, y_pred_c, 2), 5)} \n \
-                             AUC score: {round(roc_auc_score(y_true_c, y_pred_proba_c), 5)} \n \
-                             AP score: {round(average_precision_score(y_true_c, y_pred_proba_c), 5)} \n")
-        # check recall vs. precision
-        f1_report = classification_report(y_true_c, y_pred_c, labels=np.unique(y_pred_c))
-        print(f1_report)
-
-        # confusion matrix
-        print('confusion matrix: \n', confusion_matrix(y_true_c, y_pred_c), '\n')
-
-        TN, FP, FN, TP = confusion_matrix(y_true_c, y_pred_c).ravel()
-        tp_lst.append(TP)
-        fn_lst.append(FN)
-        fp_lst.append(FP)
-        f1_lst.append(2 * TP / (2 * TP + FN + FP))
-        f2_lst.append((1 + beta ** 2) * TP / ((1 + beta ** 2) * TP + (beta ** 2) * FN + FP))
-    # F1
-    macro_f1 = 2 * sum(tp_lst) / (2 * sum(tp_lst) + sum(fn_lst) + sum(fp_lst))
-    micro_f1 = sum(f1_lst) / len(f1_lst)
-    # F2
-    macro_f2 = (1 + beta ** 2) * sum(tp_lst) / ((1 + beta ** 2) * sum(tp_lst) + (beta ** 2) * sum(fn_lst) + sum(fp_lst))
-    micro_f2 = sum(f2_lst) / len(f2_lst)
-
-    macro_f1, micro_f1, macro_f2, micro_f2 = round(macro_f1, 5), round(micro_f1, 5), round(macro_f2, 5), round(micro_f2, 5)
-
-    # flatten arrays for global metrics
-    y_true, y_pred_proba, y_pred = y_true.flatten(), y_pred_proba.flatten(), y_pred.flatten()
-
-    # overall recall
-    RECALL = round(recall_score(y_true, y_pred), 5)
-
-    # overall AUC / AP
-    AUC = round(roc_auc_score(y_true, y_pred_proba), 5)
-    AP = round(average_precision_score(y_true, y_pred_proba), 5)
-
-    # Cross-Entropy
-    CE = round(log_loss(y_true=y_true, y_pred=y_pred_proba), 5)
-    # Mean Absolute Error
-    MAE = round(mean_absolute_error(y_true=y_true, y_pred=y_pred_proba), 5)
-
-    # output
-    with open(out_dir + '/eval_metrics.txt', 'a') as wf:
-        print(f' Macro-F1: {macro_f1}, Micro-F1: {micro_f1} \n Macro-F2: {macro_f2}, Micro-F2: {micro_f2} \n'
-              f' Overall recall: {RECALL} \n'
-              f' Overall AUC score: {AUC}, AP score: {AP} \n'
-              f' Binary Cross-Entropy: {CE}, MAE: {MAE} \n')
-        wf.write(f' Macro-F1: {macro_f1}, Micro-F1: {micro_f1} \n Macro-F2: {macro_f2}, Micro-F2: {micro_f2} \n'
-                 f' Overall recall: {RECALL} \n'
-                 f' Overall AUC score: {AUC}, AP score: {AP} \n'
-                 f' Binary Cross-Entropy: {CE}, MAE: {MAE} \n')
-        wf.write(' '.join(['*'*10, 'model evaluation ended at', time.ctime(), '*'*10]) + '\n \n')
-        print(' '.join(['*'*10, 'model evaluation ended at', time.ctime(), '*'*10]))
-
-    return None
-
-
-def combo_loss(y_true, y_pred):
-    def dice_loss(y_true, y_pred):
-        numerator = 2 * tf.reduce_sum(y_true * y_pred, axis=(1,2,3))
-        denominator = tf.reduce_sum(y_true + y_pred, axis=(1,2,3))
-
-        return tf.reshape(1 - numerator / denominator, (-1, 1, 1))
-
-    return binary_crossentropy(y_true, y_pred) + dice_loss(y_true, y_pred)
-
-
-# global
-C_lst = ['Violation', 'Misdemeanor', 'Felony', 'EMS', 'Rescue', 'Fire']
-beta = 2          # for F-beta score: beta stands for weight of recall(FN) over precision(FP)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run DL models for emergency prediction')
+    parser.add_argument('--GPU', type=str, help='Specify which GPU to run with (-1 for run on CPU)', default='-1')
     parser.add_argument('-in', '--in_dir', type=str, help='Input directory', default='../data')
     parser.add_argument('-model', '--model_name', type=str, help='Choose prediction model',
-                        choices=['GRU', 'ConvLSTM'], default='GRU')
+                        choices=['GRU', 'ConvLSTM', 'MiST', 'Hetero-ConvLSTM'], default='Hetero-ConvLSTM')
     parser.add_argument('-t', '--delta_t', type=int, default=4, help='Time interval in hour(s)')
     parser.add_argument('-l', '--seq_len', type=int, default=6, help='Sequence length of observation steps')
-    parser.add_argument('--GPU', type=str, help='Specify which GPU to run with (-1 for run on CPU)', default='-1')
-    parser.add_argument('-test_len', '--days_test', type=int, help='Specify how many days for test', default=61)
-    parser.add_argument('--lr', type=float, help='Learning rate', default=0.001)
-    parser.add_argument('-batch', '--batch_size', type=int, default=64)
+    parser.add_argument('-date', '--dates', type=str, nargs='+',
+                        help='Start/end dates of train/test sets. Test follows train.'
+                             ' Example: -date 20150101 20150531 20150601 20150630',
+                        default=['20150101', '20150531', '20150601', '20150630'])
     parser.add_argument('-epoch', '--max_epoch', type=int, default=100)
-    parser.add_argument('-split', '--val_ratio', type=float, help='Validate ratio', default=0.2)
-    parser.add_argument('-unit', '--lstm_hidden_units', type=int, help='#Hidden units for LSTM', default=32)
-    parser.add_argument('-layer', '--lstm_n_layers', type=int, help='#LSTM Layers', default=2)
+    parser.add_argument('-batch', '--batch_size', type=int, default=64)
+    parser.add_argument('-lr', '--learn_rate', type=float, default=1e-3)
+    parser.add_argument('-split', '--val_ratio', type=float, help='Train-to-validation ratio', default=0.2)
+    parser.add_argument('-unit', '--n_hidden_units', type=int,
+                        help='#Hidden units for LSTM/ConvLSTM/Embedding/Attention', default=32)
+    parser.add_argument('-layer', '--n_layers', type=int,
+                        help='#Layers for LSTM/ConvLSTM/MLP', default=3)
+    parser.add_argument('-rsize', '--region_size', type=int, help='Local region size for MiST', default=3)
 
     args = parser.parse_args()
 
@@ -247,23 +175,69 @@ if __name__ == '__main__':
         gpu_config.gpu_options.visible_device_list = args.GPU
     set_session(tf.Session(config=gpu_config))
 
-    # input dir
-    in_dir = os.path.join(args.in_dir, f'{args.delta_t}h', 'EmergNYC_bi_20x10.npy')
     # output dir
     out_dir = os.path.join('./baseline', args.model_name)
     if not os.path.exists(out_dir):
         os.makedirs(out_dir)
 
     # load data
+    in_dir = os.path.join(args.in_dir, f'{args.delta_t}h', 'EmergNYC_bi_20x10.npy')
     data, ha = load_data(in_dir)
+    if args.model_name == 'MiST':
+        data_local = np.load(os.path.join(args.in_dir, f'{args.delta_t}h',
+                                          f'EmergNYC_bi_20x10_{args.region_size}x{args.region_size}region.npy'))
+        print('Loaded Emergency NYC data local.. \n   Shape: ', data_local.shape)
+    elif args.model_name == 'Hetero-ConvLSTM':
+        data_t_vari = np.load(os.path.join(args.in_dir, f'{args.delta_t}h', 'moblty', 'pcount-in_out.npy'))
+        data_t_invari = np.load(os.path.join(args.in_dir, f'{args.delta_t}h', 'Hetero_invar_feat.npy'))
+        print('Loaded time-variant features: ', data_t_vari.shape, '\n',
+              '      time-invariant + spatial_graph features: ', data_t_invari.shape)
 
     # split train/test data
-    len_test = int(args.days_test * 24 / args.delta_t)
-    trainSet, testSet = getXSYS(data, len_test, args.seq_len)
+    #len_test = int(args.days_test * 24 / args.delta_t)
+    if args.model_name not in ['MiST', 'Hetero-ConvLSTM']:
+        trainSet, testSet = split_data(data, args.dates, args.delta_t, args.seq_len)
+    elif args.model_name == 'MiST':
+        from model.baseline.MiST import split_data_MiST
+        trainSet, testSet = split_data_MiST(data_local, args.dates, args.delta_t, args.seq_len,
+                                            args.region_size, len(C_lst))
+    elif args.model_name == 'Hetero-ConvLSTM':
+        from model.baseline.Hetero_ConvLSTM import split_data_Hetero
+        trainSet, testSet = split_data_Hetero(data, data_t_vari, data_t_invari, args.dates, args.delta_t, args.seq_len)
 
-    # get model
-    model = get_model(args.model_name, args.seq_len, args.lstm_n_layers, args.lstm_hidden_units)
+    if args.model_name != 'Hetero-ConvLSTM':
+        # get model
+        model = get_model(args.model_name, args.seq_len, args.n_layers, args.n_hidden_units, args.region_size, len(C_lst))
 
-    # train/test model
-    train_model(args, out_dir, model, trainSet, ha)
-    test_model(out_dir, model, testSet, ha)
+        # train & evaluate
+        trainY, predY = train_model(args, out_dir, model, trainSet)
+        eval_metrics(out_dir, trainY, predY, ha)
+        # test & evaluate
+        testY, predY = test_model(out_dir, model, testSet)
+        eval_metrics(out_dir, testY, predY, ha)
+
+    else:
+        assert len(trainSet) == len(testSet) == len(C_lst)
+
+        train_y_true, train_y_pred = [], []
+        test_y_true, test_y_pred = [], []
+
+        for c in range(len(C_lst)):
+            # get Hetero-ConvLSTM: category-separate train/test
+            print(f'Processing category {C_lst[c]}..')
+            locals()[f'model_{C_lst[c]}'] = get_model(args.model_name, args.seq_len, args.n_layers,
+                                                      args.n_hidden_units, args.region_size, len(C_lst))
+            trainY, predY = train_model(args, out_dir, locals()[f'model_{C_lst[c]}'], trainSet[c])
+            train_y_true.append(trainY)
+            train_y_pred.append(predY)
+            testY, predY = test_model(out_dir, locals()[f'model_{C_lst[c]}'], testSet[c])
+            test_y_true.append(testY)
+            test_y_pred.append(predY)
+
+        # evaluate together
+        train_y_true = np.squeeze(np.array(train_y_true).transpose((1, 2, 3, 4, 0)))
+        train_y_pred = np.squeeze(np.array(train_y_pred).transpose((1, 2, 3, 4, 0)))
+        eval_metrics(out_dir, train_y_true, train_y_pred, ha)
+        test_y_true = np.squeeze(np.array(test_y_true).transpose((1, 2, 3, 4, 0)))
+        test_y_pred = np.squeeze(np.array(test_y_pred).transpose((1, 2, 3, 4, 0)))
+        eval_metrics(out_dir, test_y_true, test_y_pred, ha)
