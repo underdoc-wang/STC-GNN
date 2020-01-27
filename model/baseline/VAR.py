@@ -32,7 +32,7 @@ def rolling_fit_pred(data_pca, pca_components, train_len, test_len, timestep):
     for i in range(pred_len):
         ts = data_pca[i : i+train_len]     # get time series
         print('Processing time series #', i)
-        data_pca_pred[i] = vector_AR(6, ts)
+        data_pca_pred[i] = vector_AR(timestep, ts)
     return data_pca_pred
 
 

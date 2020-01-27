@@ -19,23 +19,6 @@ def getXSYS(data, timestep):
     return XS, YS
 
 
-def get_meta(in_dir, train_len, H, W, C, timestep):
-    meta = np.genfromtxt(in_dir + '/day_info_onehot2015.csv', delimiter=',', skip_header=True)
-    meta = np.delete(meta, obj=0, axis=1)     # remove timestamp column
-    meta = meta.astype(int)     # convert to type int
-
-    trainY_meta, testY_meta = meta[timestep:train_len], meta[train_len+timestep:]
-    trainY_meta = np.broadcast_to(trainY_meta, (H*W*C, trainY_meta.shape[0], trainY_meta.shape[1]))
-    testY_meta = np.broadcast_to(testY_meta, (H*W*C, testY_meta.shape[0], testY_meta.shape[1]))
-    trainY_meta, testY_meta = trainY_meta.reshape((-1, trainY_meta.shape[-1])), testY_meta.reshape((-1, testY_meta.shape[-1]))
-
-    return trainY_meta, testY_meta
-
-
-# global
-use_meta = False
-
-
 def run_LR(model_dir, trainSet, testSet, timestep):
     # get shape
     H, W, C = trainSet.shape[1], trainSet.shape[2], trainSet.shape[3]
@@ -45,11 +28,6 @@ def run_LR(model_dir, trainSet, testSet, timestep):
     trainX, trainY = getXSYS(trainSet, timestep)
     testX, testY = getXSYS(testSet, timestep)
 
-    # whether or not to use metadata
-    if use_meta:
-        trainY_meta, testY_meta = get_meta(model_dir, train_len, H, W, C, timestep)
-        trainX = np.concatenate([trainX, trainY_meta], axis=1)
-        testX = np.concatenate([testX, testY_meta], axis=1)
     print('Train set shape: X/Y', trainX.shape, trainY.shape)
     print('Test set shape: X/Y', testX.shape, testY.shape)
 
@@ -70,6 +48,6 @@ def run_LR(model_dir, trainSet, testSet, timestep):
 
     y_true = testY.reshape((-1, H, W, C))
     y_pred = predY.reshape((-1, H, W, C))
-    print('#Positive predictions: ', y_pred[y_pred!=0].shape[0])
+    print('#Positive predictions: ', y_pred[y_pred!=0].shape[0], '\n')
 
     return y_true, y_pred

@@ -2,7 +2,7 @@ import os
 import argparse
 import numpy as np
 import pandas as pd
-from model.metrics import eval_metrics, C_lst
+from metrics import eval_metrics, C_lst
 
 
 
@@ -47,11 +47,11 @@ def split_data(data, dates, delta_t):
 def run_model(model_name, model_dir, trainSet, testSet, timestep):
     print(f'Running model {model_name}.. \n   Observing last {timestep} steps to predict next one step.')
     if model_name == 'VAR':
-        from model.baseline.VAR import run_VAR
+        from baseline.VAR import run_VAR
         y_true, y_pred = run_VAR(model_dir, trainSet, testSet, timestep)
 
     elif model_name == 'LR':
-        from model.baseline.LR import run_LR
+        from baseline.LR import run_LR
         y_true, y_pred = run_LR(model_dir, trainSet, testSet, timestep)
 
     elif model_name == 'LASSO':
@@ -75,7 +75,7 @@ if __name__ == '__main__':
     parser.add_argument('-model', '--model_name', type=str, help='Choose prediction model',
                         choices=['LR', 'VAR', 'LASSO', 'SVM'], default='LR')
     parser.add_argument('-t', '--delta_t', type=int, default=4, help='Time interval in hour(s)')
-    parser.add_argument('-l', '--seq_len', type=int, default=6, help='Sequence length of observation steps')
+    parser.add_argument('-l', '--seq_len', type=int, default=9, help='Sequence length of observation steps')
     parser.add_argument('-date', '--dates', type=str, nargs='+',
                         help='Start/end dates of train/test sets. Test follows train.'
                              ' Example: -date 20150101 20150531 20150601 20150630',
