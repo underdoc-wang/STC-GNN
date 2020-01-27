@@ -5,15 +5,22 @@ import numpy as np
 import pandas as pd
 from keras.losses import binary_crossentropy
 from keras.callbacks import EarlyStopping, CSVLogger, ModelCheckpoint, LearningRateScheduler
-from model.metrics import eval_metrics, H, W, C_lst
+from metrics import eval_metrics, H, W, C_lst
 
 
 def load_data(in_dir):
     data = np.load(in_dir)
     print('Loaded Emergency NYC data.. \n   Shape:', data.shape)
 
-    # historical avg. - regional occurence rate
-    ha = np.mean(data, axis=0)
+    # historical avg. - categorical occurence rate
+    print('Historical occur rate:')
+    ha = []
+
+    for c in range(data.shape[-1]):
+        neg, pos = np.bincount(data[:, :, :, c].flatten())
+        occur_rate = pos / (neg + pos)
+        ha.append(occur_rate)
+        print(f'   {C_lst[c]}:   {round(occur_rate, 2) * 100}% (supports {pos})')
 
     return data, ha
 
@@ -144,7 +151,7 @@ if __name__ == '__main__':
     parser.add_argument('--GPU', type=str, help='Specify which GPU to run with (-1 for run on CPU)', default='-1')
     parser.add_argument('-in', '--in_dir', type=str, help='Input directory', default='../data')
     parser.add_argument('-model', '--model_name', type=str, help='Choose prediction model',
-                        choices=['GRU', 'ConvLSTM', 'MiST', 'Hetero-ConvLSTM'], default='Hetero-ConvLSTM')
+                        choices=['GRU', 'ConvLSTM', 'MiST', 'Hetero-ConvLSTM'], default='MiST')
     parser.add_argument('-t', '--delta_t', type=int, default=4, help='Time interval in hour(s)')
     parser.add_argument('-l', '--seq_len', type=int, default=6, help='Sequence length of observation steps')
     parser.add_argument('-date', '--dates', type=str, nargs='+',
@@ -189,7 +196,7 @@ if __name__ == '__main__':
         print('Loaded Emergency NYC data local.. \n   Shape: ', data_local.shape)
     elif args.model_name == 'Hetero-ConvLSTM':
         data_t_vari = np.load(os.path.join(args.in_dir, f'{args.delta_t}h', 'moblty', 'pcount-in_out.npy'))
-        data_t_invari = np.load(os.path.join(args.in_dir, f'{args.delta_t}h', 'Hetero_invar_feat.npy'))
+        data_t_invari = np.load(os.path.join(args.in_dir, f'{args.delta_t}h', 'Hetero_invar_feat_all.npy'))
         print('Loaded time-variant features: ', data_t_vari.shape, '\n',
               '      time-invariant + spatial_graph features: ', data_t_invari.shape)
 
@@ -198,11 +205,11 @@ if __name__ == '__main__':
     if args.model_name not in ['MiST', 'Hetero-ConvLSTM']:
         trainSet, testSet = split_data(data, args.dates, args.delta_t, args.seq_len)
     elif args.model_name == 'MiST':
-        from model.baseline.MiST import split_data_MiST
+        from baseline.MiST import split_data_MiST
         trainSet, testSet = split_data_MiST(data_local, args.dates, args.delta_t, args.seq_len,
                                             args.region_size, len(C_lst))
     elif args.model_name == 'Hetero-ConvLSTM':
-        from model.baseline.Hetero_ConvLSTM import split_data_Hetero
+        from baseline.Hetero_ConvLSTM import split_data_Hetero
         trainSet, testSet = split_data_Hetero(data, data_t_vari, data_t_invari, args.dates, args.delta_t, args.seq_len)
 
     if args.model_name != 'Hetero-ConvLSTM':
@@ -211,10 +218,10 @@ if __name__ == '__main__':
 
         # train & evaluate
         trainY, predY = train_model(args, out_dir, model, trainSet)
-        eval_metrics(out_dir, trainY, predY, ha)
+        eval_metrics(out_dir, args.dates[:2], trainY, predY, ha)
         # test & evaluate
         testY, predY = test_model(out_dir, model, testSet)
-        eval_metrics(out_dir, testY, predY, ha)
+        eval_metrics(out_dir, args.dates[2:], testY, predY, ha)
 
     else:
         assert len(trainSet) == len(testSet) == len(C_lst)
@@ -234,10 +241,11 @@ if __name__ == '__main__':
             test_y_true.append(testY)
             test_y_pred.append(predY)
 
-        # evaluate together
+        # evaluate categories together
         train_y_true = np.squeeze(np.array(train_y_true).transpose((1, 2, 3, 4, 0)))
         train_y_pred = np.squeeze(np.array(train_y_pred).transpose((1, 2, 3, 4, 0)))
-        eval_metrics(out_dir, train_y_true, train_y_pred, ha)
+        eval_metrics(out_dir, args.dates[:2], train_y_true, train_y_pred, ha)
+
         test_y_true = np.squeeze(np.array(test_y_true).transpose((1, 2, 3, 4, 0)))
         test_y_pred = np.squeeze(np.array(test_y_pred).transpose((1, 2, 3, 4, 0)))
-        eval_metrics(out_dir, test_y_true, test_y_pred, ha)
+        eval_metrics(out_dir, args.dates[2:], test_y_true, test_y_pred, ha)

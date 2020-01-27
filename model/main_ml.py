@@ -2,7 +2,7 @@ import os
 import argparse
 import numpy as np
 import pandas as pd
-from model.metrics import eval_metrics
+from model.metrics import eval_metrics, C_lst
 
 
 
@@ -10,8 +10,15 @@ def load_data(in_dir):
     data = np.load(in_dir)
     print('Loaded Emergency NYC data.. \n   Shape:', data.shape)
 
-    # historical avg. - regional occurence rate
-    ha = np.mean(data, axis=0)
+    # historical avg. - categorical occurence rate
+    print('Historical occur rate:')
+    ha = []
+
+    for c in range(data.shape[-1]):
+        neg, pos = np.bincount(data[:, :, :, c].flatten())
+        occur_rate = pos / (neg + pos)
+        ha.append(occur_rate)
+        print(f'   {C_lst[c]}:   {round(occur_rate, 2) * 100}% (supports {pos})')
 
     return data, ha
 
@@ -32,7 +39,7 @@ def split_data(data, dates, delta_t):
     # test set
     start_index, end_index = dates_range.index(test_start), dates_range.index(test_end)
     testSet = data[start_index*day_timestep:(end_index+1)*day_timestep]
-    print(f'Test set {test_start}-{test_end}: {testSet.shape}')
+    print(f'Test set {test_start}-{test_end}: {testSet.shape} \n')
 
     return trainSet, testSet
 
@@ -93,4 +100,4 @@ if __name__ == '__main__':
     y_true, y_pred = run_model(args.model_name, out_dir, trainSet, testSet, args.seq_len)
 
     # evaluate prediction performance
-    eval_metrics(out_dir, y_true, y_pred, ha)
+    eval_metrics(out_dir, args.dates[-2:], y_true, y_pred, ha)
