@@ -36,7 +36,7 @@ def getXSYS(data, timestep):
     return XS, YS
 
 
-def split_data(data, dates, delta_t, len_seq):
+def split_data(data, dates, delta_t, len_seq, model_name):
     assert len(dates) == 4, 'Invalid dates input.. Please input a sequence with four items.' \
                             ' Input example: -date 20150101 20150531 20150601 20150630'
     train_start, train_end, test_start, test_end = dates     # unpack dates
@@ -57,6 +57,14 @@ def split_data(data, dates, delta_t, len_seq):
     # get X/Y features
     trainX, trainY = getXSYS(trainSet, len_seq)
     testX, testY = getXSYS(testSet, len_seq)
+
+    # for local GRU model
+    if model_name == 'GRU':
+        trainX = trainX.transpose((0, 2, 3, 1, 4)).reshape((-1, len_seq, len(C_lst)))
+        trainY = trainY.reshape((-1, len(C_lst)))
+        testX = testX.transpose((0, 2, 3, 1, 4)).reshape((-1, len_seq, len(C_lst)))
+        testY = testY.reshape((-1, len(C_lst)))
+
     print('Train set shape: X/Y', trainX.shape, trainY.shape)
     print('Test set shape: X/Y', testX.shape, testY.shape)
 
@@ -66,11 +74,11 @@ def split_data(data, dates, delta_t, len_seq):
 def get_model(model_name, timestep, n_layers, n_hidden_units, region_size, n_channel):
     print(f'Building model {model_name}.. \n   Observing last {timestep} steps to predict next one step.')
     if model_name == 'GRU':
-        from baseline.GRU import get_GRU
+        from baseline.Recurrent import get_GRU
         model = get_GRU(timestep, n_layers, n_hidden_units)
 
     elif model_name == 'ConvLSTM':
-        from baseline.ConvLSTM import get_ConvLSTM
+        from baseline.Recurrent import get_ConvLSTM
         model = get_ConvLSTM(timestep, n_layers, n_hidden_units)
 
     elif model_name == 'MiST':
@@ -151,9 +159,9 @@ if __name__ == '__main__':
     parser.add_argument('--GPU', type=str, help='Specify which GPU to run with (-1 for run on CPU)', default='-1')
     parser.add_argument('-in', '--in_dir', type=str, help='Input directory', default='../data')
     parser.add_argument('-model', '--model_name', type=str, help='Choose prediction model',
-                        choices=['GRU', 'ConvLSTM', 'MiST', 'Hetero-ConvLSTM'], default='MiST')
+                        choices=['GRU', 'ConvLSTM', 'MiST', 'Hetero-ConvLSTM'], default='GRU')
     parser.add_argument('-t', '--delta_t', type=int, default=4, help='Time interval in hour(s)')
-    parser.add_argument('-l', '--seq_len', type=int, default=6, help='Sequence length of observation steps')
+    parser.add_argument('-l', '--seq_len', type=int, default=9, help='Sequence length of observation steps')
     parser.add_argument('-date', '--dates', type=str, nargs='+',
                         help='Start/end dates of train/test sets. Test follows train.'
                              ' Example: -date 20150101 20150531 20150601 20150630',
@@ -163,7 +171,7 @@ if __name__ == '__main__':
     parser.add_argument('-lr', '--learn_rate', type=float, default=1e-3)
     parser.add_argument('-split', '--val_ratio', type=float, help='Train-to-validation ratio', default=0.2)
     parser.add_argument('-unit', '--n_hidden_units', type=int,
-                        help='#Hidden units for LSTM/ConvLSTM/Embedding/Attention', default=32)
+                        help='#Hidden units for LSTM/ConvLSTM/Embedding/Attention', default=64)
     parser.add_argument('-layer', '--n_layers', type=int,
                         help='#Layers for LSTM/ConvLSTM/MLP', default=3)
     parser.add_argument('-rsize', '--region_size', type=int, help='Local region size for MiST', default=3)
@@ -190,26 +198,25 @@ if __name__ == '__main__':
     # load data
     in_dir = os.path.join(args.in_dir, f'{args.delta_t}h', 'EmergNYC_bi_20x10.npy')
     data, ha = load_data(in_dir)
-    if args.model_name == 'MiST':
+    if args.model_name == 'MiST':     # load local data for MiST input
         data_local = np.load(os.path.join(args.in_dir, f'{args.delta_t}h',
                                           f'EmergNYC_bi_20x10_{args.region_size}x{args.region_size}region.npy'))
         print('Loaded Emergency NYC data local.. \n   Shape: ', data_local.shape)
-    elif args.model_name == 'Hetero-ConvLSTM':
+    elif args.model_name == 'Hetero-ConvLSTM':     # load time-variant & time-invariant features for Hetero inputs
         data_t_vari = np.load(os.path.join(args.in_dir, f'{args.delta_t}h', 'moblty', 'pcount-in_out.npy'))
-        data_t_invari = np.load(os.path.join(args.in_dir, f'{args.delta_t}h', 'Hetero_invar_feat_all.npy'))
+        data_t_invari = np.load(os.path.join(args.in_dir, f'{args.delta_t}h', 'Hetero_invar_feat.npy'))
         print('Loaded time-variant features: ', data_t_vari.shape, '\n',
               '      time-invariant + spatial_graph features: ', data_t_invari.shape)
 
     # split train/test data
-    #len_test = int(args.days_test * 24 / args.delta_t)
     if args.model_name not in ['MiST', 'Hetero-ConvLSTM']:
-        trainSet, testSet = split_data(data, args.dates, args.delta_t, args.seq_len)
+        trainSet, testSet = split_data(data, args.dates, args.delta_t, args.seq_len, args.model_name)
     elif args.model_name == 'MiST':
-        from baseline.MiST import split_data_MiST
+        from baseline.MiST import split_data_MiST     # for MiST feature generation
         trainSet, testSet = split_data_MiST(data_local, args.dates, args.delta_t, args.seq_len,
                                             args.region_size, len(C_lst))
     elif args.model_name == 'Hetero-ConvLSTM':
-        from baseline.Hetero_ConvLSTM import split_data_Hetero
+        from baseline.Hetero_ConvLSTM import split_data_Hetero     # for Hetero feature generation
         trainSet, testSet = split_data_Hetero(data, data_t_vari, data_t_invari, args.dates, args.delta_t, args.seq_len)
 
     if args.model_name != 'Hetero-ConvLSTM':
