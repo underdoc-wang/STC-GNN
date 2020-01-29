@@ -1,5 +1,7 @@
 import time
 import numpy as np
+import tensorflow as tf
+from keras.losses import binary_crossentropy
 from sklearn.metrics import classification_report, confusion_matrix, f1_score, fbeta_score, \
      roc_auc_score, roc_curve, average_precision_score, precision_recall_curve, \
      log_loss, mean_absolute_error, recall_score
@@ -12,6 +14,17 @@ C_lst = ['Violation', 'Misdemeanor', 'Felony', 'EMS', 'Rescue', 'Fire']
 beta = 2          # for F-beta score: beta stands for weight of recall(FN) over precision(FP)
 
 
+# Combo loss: Binary_crossentropy + Dice loss
+def combo_loss(y_true, y_pred):
+    def dice_loss(y_true, y_pred):
+        numerator = 2 * tf.reduce_sum(y_true * y_pred, axis=(1, 2, 3))
+        denominator = tf.reduce_sum(y_true + y_pred, axis=(1, 2, 3))
+
+        return tf.reshape(1 - numerator / denominator, (-1, 1, 1))
+    return binary_crossentropy(y_true, y_pred) + dice_loss(y_true, y_pred)
+
+
+# Evaluation metrics
 def eval_metrics(out_dir, dates, y_true, y_pred_proba, ha):
     '''
     # evaluate on macro/micro-F1/F2, recall, AUC/AP, BCE, MAE
