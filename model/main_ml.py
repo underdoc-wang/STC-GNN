@@ -55,12 +55,12 @@ def run_model(model_name, model_dir, trainSet, testSet, timestep):
         y_true, y_pred = run_LR(model_dir, trainSet, testSet, timestep)
 
     elif model_name == 'LASSO':
-        # TODO: LASSO - Cai 1/31
-        pass
+        from baseline.LASSO import run_LASSO
+        y_true, y_pred = run_LASSO(model_dir, trainSet, testSet, timestep)
 
     elif model_name == 'SVM':
-        # TODO: SVM - Cai 1/31
-        pass
+        from baseline.SVM import run_SVM
+        y_true, y_pred = run_SVM(model_dir, trainSet, testSet, timestep)
 
     else:
         raise Exception('Unknown model name..')
