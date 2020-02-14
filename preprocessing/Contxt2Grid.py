@@ -243,16 +243,29 @@ def get_pearson(args):
                '%parks_outdoors', '%professional', '%residence', '%shops', '%travel']
 
     pearson_poi = []
+    sig_poi = []
     for i in range(len(poi_lst)):
         row =[]
+        sig = []
         for e in range(len(emerg_lst)):
-            r = stats.pearsonr(poi_norm[:, i], emerg[:, e])[0]
-            print(f'{poi_lst[i]}~{emerg_lst[e]}: {r}')
+            r, p = stats.pearsonr(poi_norm[:, i], emerg[:, e])
+            print(f'{poi_lst[i]}~{emerg_lst[e]}: {round(r, 4)}, sig: {round(p, 4)}')
             row.append(r)
+            sig.append(p)
         pearson_poi.append(row)
-
+        sig_poi.append((sig))
     pearson_poi_np = np.array(pearson_poi)
+    sig_poi_np = np.array(sig_poi)
     print(pearson_poi_np.shape)
+
+    # print POI's r range
+    print("Pearson's r - row range")
+    #for demo, min_, max_ in zip(demo_lst, np.min(pearson_demo_np, axis=1), np.max(pearson_demo_np, axis=1)):
+    #    print(demo, round(min_,4), round(max_,4))
+    for i in range(pearson_poi_np.shape[0]):
+        print(poi_lst[i], '\n',
+              round(np.min(pearson_poi_np[i,:]), 4), 'p', round(sig_poi_np[i, np.argmin(pearson_poi_np[i,:])], 6), '\n',
+              round(np.max(pearson_poi_np[i,:]), 4), 'p', round(sig_poi_np[i, np.argmax(pearson_poi_np[i,:])], 6), '\n')
 
     fig, ax = plt.subplots()
     im, cbar = heatmap.heatmap(pearson_poi_np, poi_lst, emerg_lst, ax=ax, vmin=-0.3, vmax=0.5,
