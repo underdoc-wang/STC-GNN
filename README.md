@@ -1,7 +1,5 @@
 # CIKM 2021 Paper
-## [Spatio-Temporal-Categorical Graph Neural Networks for Fine-Grained Multi-Incident Co-Prediction](https://dl.acm.org/doi/pdf/10.1145/3459637.3482482)
-
-Coming soon...
+## [Spatio-Temporal-Categorical Graph Neural Networks for Fine-Grained Multi-Incident Co-Prediction](https://www.researchgate.net/publication/355785587_Spatio-Temporal-Categorical_Graph_Neural_Networks_for_Fine-Grained_Multi-Incident_Co-Prediction)
 
 ## Citation
 If you find anything in this repository useful to your research, please cite our paper :) We sincerely appreciate it.
